@@ -44,3 +44,78 @@ Test it: pytest tests/test_pipeline.py -k app
 #
 # What the page does NOT do: cleaning, grouping, pivoting. If you find yourself
 # writing a groupby or a pivot_table here, that logic belongs in the package.
+
+import streamlit as st
+
+from payroll import (
+    build_history,
+    hours_grid,
+    load_employees,
+    load_export,
+    missed_weeks,
+    pay_by_month,
+    summarize_employees,
+)
+
+# 1. title, roster, and uploader -> always show, even if no files have been uploaded yet
+st.title("Salt City Coffee — Quarterly Payroll Report")
+st.write("Upload the weekly payroll exports to see the quarter.")
+roster = load_employees()
+uploads = st.file_uploader(
+    "Weekly payroll exports", type=["csv"], accept_multiple_files=True, key="exports"
+)
+
+if uploads:
+    # 2. build the history
+    history = build_history([load_export(u) for u in uploads], roster)
+
+    # 3. warn about IDs not on the roster and then keep only the matched rows
+    unmatched = history[history["department"].isna()]
+    if len(unmatched) > 0:
+        ids = ", ".join(sorted(unmatched["employeeid"].unique()))
+        st.warning(f"Not on the roster, left out of the report: {ids}")
+    matched = history[history["department"].notna()]
+
+    # 4. filter by department and date range, then the filtered rows
+    departments = ["All"] + sorted(matched["department"].unique())
+    department = st.selectbox("Department", departments, key="department")
+
+    first = matched["pay_date"].min().date()
+    last = matched["pay_date"].max().date()
+    dates = st.date_input("Pay dates", value=(first, last),
+                          min_value=first, max_value=last, key="dates")
+    start, end = dates if len(dates) == 2 else (dates[0], dates[0])
+
+    selected = matched
+    if department != "All":
+        selected = selected[selected["department"] == department]
+    pay_dates = selected["pay_date"].dt.date
+    selected = selected[(pay_dates >= start) & (pay_dates <= end)]
+
+    st.subheader(f"{department}: {start} to {end}")
+
+    # 5. four metrics in four columns
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Weeks", selected["week_ending"].nunique())
+    col2.metric("Employees", selected["employee_id"].nunique())
+    col3.metric("Total hours", f"{selected['hours_worked'].sum():,.2f}")
+    col4.metric("Total gross pay", f"${selected['gross_pay'].sum():,.2f}")
+
+    # 6. chart, three tables, download
+    monthly = pay_by_month(selected)
+    st.subheader("Gross pay by month")
+    st.bar_chart(monthly, x="month")
+    st.subheader("Employee summary")
+    st.dataframe(summarize_employees(selected))
+    grid = hours_grid(selected)
+    st.subheader("Hours by week")
+    st.dataframe(grid)
+    st.subheader("Missed weeks")
+    st.dataframe(missed_weeks(grid))
+    st.download_button(
+        "Download pay by month (CSV)",
+        data=monthly.to_csv(index=False),
+        file_name="pay_by_month.csv",
+        mime="text/csv",
+        key="download",
+    )
