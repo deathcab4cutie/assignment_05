@@ -55,11 +55,12 @@ def missed_weeks(grid: pd.DataFrame) -> pd.DataFrame:
     columns become `week_ending` / `hours_worked` pairs), then keep the zeros.
     """
     long = grid.melt(
-    id_vars=["employee_id", "display_name"],
-    var_name="week_ending",
-    value_name="hours_worked",
-)
-    return long[long["hours_worked"] == 0].reset_index(drop=True)
+        id_vars=["employee_id", "display_name"],
+        var_name="week_ending",
+        value_name="hours_worked",
+    )
+    missed = long[long["hours_worked"] == 0]
+    return missed.sort_values(["employee_id", "week_ending"]).reset_index(drop=True)
 
 
 def pay_by_month(history: pd.DataFrame) -> pd.DataFrame:
